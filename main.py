@@ -213,11 +213,14 @@ def manual_mode():
     average_ms = (measure_mac(pattern, filter_a) +
                   measure_mac(pattern, filter_b)) / 2
 
-    print("\n[3] MAC 계산 결과")
+    # 사전평가 #1: 필터 2개, MAC 점수, 시간(ms), 판정을 한 구간에서 확인합니다.
+    print("\n[3] 3x3 입력·MAC 계산 통합 결과")
+    print("입력 필터: A(3x3), B(3x3) - 총 2개")
     print(f"A 점수: {score_a}")
     print(f"B 점수: {score_b}")
-    print(f"평균 연산 시간(각 10회): {average_ms:.6f} ms")
+    print(f"평균 연산 시간(각 10회, 단위 ms): {average_ms:.6f} ms")
     print(f"판정: {result}")
+
     show_performance({3: (pattern, filter_a)})
     # 모드 1은 3x3 입력만 있으므로 해당 크기만 비교한다.
     benchmark_bonus({3: (pattern, filter_a)})
@@ -238,6 +241,8 @@ def json_mode():
         print(f"JSON 파일 로드 실패: {error}")
         return
 
+    # 사전평가 #4: 로드한 그룹과 패턴 수를 바로 확인할 수 있게 합니다.
+    print(f"JSON 로드 완료: filters={len(filters)}개 크기, patterns={len(patterns)}개 케이스")
     for size in (5, 13, 25):
         key = f"size_{size}"
         print(f"{key} 필터 {'확인' if key in filters else '누락'}")
@@ -261,7 +266,8 @@ def json_mode():
             if not valid_matrix(pattern, size):
                 raise ValueError("패턴 크기 또는 숫자 데이터 오류")
 
-            group = filters[f"size_{size}"]
+            filter_key = f"size_{size}"
+            group = filters[filter_key]
             if not isinstance(group, dict):
                 raise ValueError("필터 구조 오류")
             standard = {}
@@ -275,6 +281,9 @@ def json_mode():
             if set(standard) != {"Cross", "X"}:
                 raise ValueError("Cross 또는 X 필터 누락")
 
+            # 사전평가 #4: JSON 로드 -> 패턴 키 -> N 추출 -> 필터 키 선택을 한 줄로 출력합니다.
+            print(f"JSON 선택 로그: patterns[{case_id}] -> N={size} -> "
+                  f"filters[{filter_key}] -> Cross/X 필터 선택 완료")
             cross_score = mac(pattern, standard["Cross"])
             x_score = mac(pattern, standard["X"])
             result = decide(cross_score, x_score, "Cross", "X")
@@ -321,7 +330,7 @@ def main():
     elif mode == "3":
         generator_mode()
     else:
-        print("잘못된 선택입니다. 1 또는 2를 입력하세요.")
+        print("잘못된 선택입니다. 1, 2 또는 3을 입력하세요.")
 
 
 if __name__ == "__main__":
