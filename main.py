@@ -71,6 +71,119 @@ def show_performance(samples):
         print(f"{str(size) + 'x' + str(size):<10} {average_ms:>15.6f} {size * size:>17}")
 
 
+def flatten_matrix(matrix):
+    """2차원 행렬을 행 순서대로 1차원 배열로 변환한다."""
+    return [value for row in matrix for value in row]
+
+
+def mac_flat(pattern_flat, filter_flat):
+    """1차원 배열의 같은 위치끼리 곱하고 더한다."""
+    if len(pattern_flat) != len(filter_flat):
+        raise ValueError("1차원 배열 길이 불일치")
+    score = 0.0
+    for i in range(len(pattern_flat)):
+        score += pattern_flat[i] * filter_flat[i]
+    return score
+
+
+def benchmark_bonus(samples, repeats=1000):
+    """동일한 입력과 횟수로 2차원/1차원 MAC의 계산 구간만 측정한다."""
+    print(f"\n[보너스 1] 2차원 vs 1차원 MAC 성능 비교 (각 {repeats}회 평균)")
+    print(f"{'크기':<8} {'2차원(ms)':>13} {'1차원(ms)':>13} {'점수 일치':>12}")
+    print("-" * 51)
+
+    for size in (3, 5, 13, 25):
+        sample = samples.get(size)
+        if sample is None:
+            print(f"{size}x{size:<5} {'측정 불가':>13}")
+            continue
+        pattern, filter_data = sample
+        if not valid_matrix(pattern, size) or not valid_matrix(filter_data, size):
+            print(f"{size}x{size:<5} {'데이터 오류':>13}")
+            continue
+
+        # 변환 시간은 MAC 연산 시간과 분리한다.
+        p_flat = flatten_matrix(pattern)
+        f_flat = flatten_matrix(filter_data)
+        score_2d = mac(pattern, filter_data)
+        score_1d = mac_flat(p_flat, f_flat)
+        same = math.isclose(score_2d, score_1d, rel_tol=0, abs_tol=EPSILON)
+
+        start = time.perf_counter()
+        for _ in range(repeats):
+            mac(pattern, filter_data)
+        time_2d = (time.perf_counter() - start) * 1000 / repeats
+
+        start = time.perf_counter()
+        for _ in range(repeats):
+            mac_flat(p_flat, f_flat)
+        time_1d = (time.perf_counter() - start) * 1000 / repeats
+
+        print(f"{str(size) + 'x' + str(size):<8} {time_2d:>13.6f} "
+              f"{time_1d:>13.6f} {('일치' if same else '불일치'):>12}")
+        if not same:
+            print(f"  주의: 점수 불일치 (2D={score_2d}, 1D={score_1d})")
+
+    print("※ 배열 변환 및 출력 시간 제외, 동일 입력·동일 반복 횟수 기준")
+    print("※ 1차원이 반드시 더 빠른 것은 아니며 실행마다 결과가 달라질 수 있습니다.")
+
+
+def generate_pattern(size, label):
+    """홀수 N에 대해 0/1 Cross 또는 X 패턴을 만든다."""
+    if not isinstance(size, int) or isinstance(size, bool) or size < 3 or size > 25 or size % 2 == 0:
+        raise ValueError("크기는 3~25 범위의 홀수여야 합니다.")
+    label = normalize_label(label)
+    center = size // 2
+    matrix = []
+    for row in range(size):
+        values = []
+        for col in range(size):
+            if label == "Cross":
+                value = 1 if row == center or col == center else 0
+            else:
+                value = 1 if row == col or row + col == size - 1 else 0
+            values.append(value)
+        matrix.append(values)
+    return matrix
+
+
+def generator_mode():
+    print("\n[보너스 2] Cross / X 패턴 자동 생성")
+    while True:
+        raw = input("크기 N (3~25 사이 홀수): ").strip()
+        try:
+            size = int(raw)
+            if size < 3 or size > 25 or size % 2 == 0:
+                raise ValueError
+            break
+        except ValueError:
+            print("입력 오류: 3~25 사이 홀수(예: 3, 5, 13, 25)를 입력하세요.")
+
+    cross = generate_pattern(size, "Cross")
+    x_pattern = generate_pattern(size, "X")
+    for name, matrix in (("Cross", cross), ("X", x_pattern)):
+        print(f"\n{name} ({size}x{size})")
+        for row in matrix:
+            print(" ".join(map(str, row)))
+
+    print("\n[자동 생성 패턴 MAC 판정]")
+    for label, pattern in (("Cross", cross), ("X", x_pattern)):
+        score_cross = mac(pattern, cross)
+        score_x = mac(pattern, x_pattern)
+        result = decide(score_cross, score_x, "Cross", "X")
+        print(f"{label}: Cross={score_cross:.1f}, X={score_x:.1f} -> {result}")
+
+    avg_ms = measure_mac(cross, cross, repeats=10)
+    print(f"\n[생성된 {size}x{size} 패턴의 성능 분석]")
+    print(f"10회 평균 MAC 시간: {avg_ms:.6f} ms | 연산 횟수: {size * size}")
+    # 보너스 1 함수도 자동 생성 패턴으로 재활용한다.
+    flat_cross = flatten_matrix(cross)
+    score_2d = mac(cross, cross)
+    score_1d = mac_flat(flat_cross, flat_cross)
+    same = math.isclose(score_2d, score_1d, rel_tol=0, abs_tol=EPSILON)
+    print(f"2차원/1차원 MAC 점수 일치: {'일치' if same else '불일치'}")
+
+
 def input_matrix(name):
     print(f"\n{name} (3줄 입력, 공백 구분)")
     matrix = []
@@ -106,6 +219,8 @@ def manual_mode():
     print(f"평균 연산 시간(각 10회): {average_ms:.6f} ms")
     print(f"판정: {result}")
     show_performance({3: (pattern, filter_a)})
+    # 모드 1은 3x3 입력만 있으므로 해당 크기만 비교한다.
+    benchmark_bonus({3: (pattern, filter_a)})
 
 
 def json_mode():
@@ -180,6 +295,7 @@ def json_mode():
             print(f"FAIL ({reason})")
 
     show_performance(samples)
+    benchmark_bonus(samples)
     print("\n[4] 결과 요약")
     print(f"총 테스트: {len(patterns)}개")
     print(f"통과: {passed}개")
@@ -196,11 +312,14 @@ def main():
     print("=== Mini NPU Simulator ===")
     print("1. 사용자 입력 (3x3)")
     print("2. data.json 분석")
+    print("3. 패턴 자동 생성 (보너스 2)")
     mode = input("선택: ").strip()
     if mode == "1":
         manual_mode()
     elif mode == "2":
         json_mode()
+    elif mode == "3":
+        generator_mode()
     else:
         print("잘못된 선택입니다. 1 또는 2를 입력하세요.")
 
