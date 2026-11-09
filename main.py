@@ -7,6 +7,7 @@ from pathlib import Path
 EPSILON = 1e-9
 DATA_FILE = Path(__file__).resolve().parent / "data.json"
 CROSS_3 = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
+PERFORMANCE_REPEATS = 1000
 
 
 def mac(pattern, filter_data):
@@ -47,7 +48,16 @@ def decide(score_a, score_b, label_a="A", label_b="B"):
     return label_a if score_a > score_b else label_b
 
 
-def measure_mac(pattern, filter_data, repeats=10):
+def display_manual_decision(result):
+    if result == "UNDECIDED":
+        return f"판정 불가 (|A-B| < {EPSILON:g})"
+    return result
+
+
+def measure_mac(pattern, filter_data, repeats=PERFORMANCE_REPEATS):
+    # 첫 호출은 워밍업으로 사용하고 측정 시간에서 제외한다.
+    mac(pattern, filter_data)
+
     start = time.perf_counter()
     for _ in range(repeats):
         mac(pattern, filter_data)
@@ -56,7 +66,7 @@ def measure_mac(pattern, filter_data, repeats=10):
 
 
 def show_performance(samples):
-    print("\n[성능 분석] MAC 함수 10회 평균")
+    print(f"\n[성능 분석] MAC 함수 {PERFORMANCE_REPEATS}회 평균 (워밍업 1회 제외)")
     print(f"{'크기':<10} {'평균 시간(ms)':>15} {'연산 횟수(N²)':>17}")
     print("-" * 46)
     for size in (3, 5, 13, 25):
@@ -67,7 +77,7 @@ def show_performance(samples):
         if not valid_matrix(pattern, size) or not valid_matrix(filter_data, size):
             print(f"{size}x{size:<7} {'데이터 오류':>15} {'-':>17}")
             continue
-        average_ms = measure_mac(pattern, filter_data, repeats=10)
+        average_ms = measure_mac(pattern, filter_data)
         print(f"{str(size) + 'x' + str(size):<10} {average_ms:>15.6f} {size * size:>17}")
 
 
@@ -109,6 +119,10 @@ def benchmark_bonus(samples, repeats=1000):
         score_1d = mac_flat(p_flat, f_flat)
         same = math.isclose(score_2d, score_1d, rel_tol=0, abs_tol=EPSILON)
 
+        # 두 방식 모두 첫 호출을 워밍업으로 사용하고 측정에서 제외한다.
+        mac(pattern, filter_data)
+        mac_flat(p_flat, f_flat)
+
         start = time.perf_counter()
         for _ in range(repeats):
             mac(pattern, filter_data)
@@ -125,7 +139,39 @@ def benchmark_bonus(samples, repeats=1000):
             print(f"  주의: 점수 불일치 (2D={score_2d}, 1D={score_1d})")
 
     print("※ 배열 변환 및 출력 시간 제외, 동일 입력·동일 반복 횟수 기준")
+    print("※ 각 방식 첫 호출은 워밍업으로 제외했습니다.")
     print("※ 1차원이 반드시 더 빠른 것은 아니며 실행마다 결과가 달라질 수 있습니다.")
+
+
+def load_filter_groups(filters):
+    """필터를 한 번만 검증하고 Cross/X 표준 라벨로 정리한다."""
+    loaded = {}
+    errors = {}
+
+    for size in (5, 13, 25):
+        filter_key = f"size_{size}"
+        try:
+            group = filters[filter_key]
+            if not isinstance(group, dict):
+                raise ValueError("필터 그룹 구조 오류")
+
+            standard = {}
+            for label, matrix in group.items():
+                normalized = normalize_label(label)
+                if normalized in standard:
+                    raise ValueError("필터 라벨 중복")
+                if not valid_matrix(matrix, size):
+                    raise ValueError("필터 크기 또는 숫자 데이터 오류")
+                standard[normalized] = matrix
+
+            if set(standard) != {"Cross", "X"}:
+                raise ValueError("Cross 또는 X 필터 누락")
+
+            loaded[size] = standard
+        except (KeyError, TypeError, ValueError) as error:
+            errors[size] = str(error)
+
+    return loaded, errors
 
 
 def generate_pattern(size, label):
@@ -173,9 +219,9 @@ def generator_mode():
         result = decide(score_cross, score_x, "Cross", "X")
         print(f"{label}: Cross={score_cross:.1f}, X={score_x:.1f} -> {result}")
 
-    avg_ms = measure_mac(cross, cross, repeats=10)
+    avg_ms = measure_mac(cross, cross, repeats=PERFORMANCE_REPEATS)
     print(f"\n[생성된 {size}x{size} 패턴의 성능 분석]")
-    print(f"10회 평균 MAC 시간: {avg_ms:.6f} ms | 연산 횟수: {size * size}")
+    print(f"{PERFORMANCE_REPEATS}회 평균 MAC 시간: {avg_ms:.6f} ms | 연산 횟수: {size * size}")
     # 보너스 1 함수도 자동 생성 패턴으로 재활용한다.
     flat_cross = flatten_matrix(cross)
     score_2d = mac(cross, cross)
@@ -213,13 +259,13 @@ def manual_mode():
     average_ms = (measure_mac(pattern, filter_a) +
                   measure_mac(pattern, filter_b)) / 2
 
-    # 사전평가 #1: 필터 2개, MAC 점수, 시간(ms), 판정을 한 구간에서 확인합니다.
     print("\n[3] 3x3 입력·MAC 계산 통합 결과")
     print("입력 필터: A(3x3), B(3x3) - 총 2개")
     print(f"A 점수: {score_a}")
     print(f"B 점수: {score_b}")
-    print(f"평균 연산 시간(각 10회, 단위 ms): {average_ms:.6f} ms")
-    print(f"판정: {result}")
+    print(f"점수 차이: {abs(score_a - score_b):.12g}")
+    print(f"평균 연산 시간(각 {PERFORMANCE_REPEATS}회, 단위 ms): {average_ms:.6f} ms")
+    print(f"판정: {display_manual_decision(result)}")
 
     show_performance({3: (pattern, filter_a)})
     # 모드 1은 3x3 입력만 있으므로 해당 크기만 비교한다.
@@ -241,13 +287,18 @@ def json_mode():
         print(f"JSON 파일 로드 실패: {error}")
         return
 
-    # 사전평가 #4: 로드한 그룹과 패턴 수를 바로 확인할 수 있게 합니다.
     print(f"JSON 로드 완료: filters={len(filters)}개 크기, patterns={len(patterns)}개 케이스")
-    for size in (5, 13, 25):
-        key = f"size_{size}"
-        print(f"{key} 필터 {'확인' if key in filters else '누락'}")
 
-    print("\n[2] 패턴 자동 분석")
+    print("\n[2] 필터 로드 및 검증")
+    loaded_filters, filter_errors = load_filter_groups(filters)
+    for size in (5, 13, 25):
+        filter_key = f"size_{size}"
+        if size in loaded_filters:
+            print(f"✓ {filter_key} 필터 로드 완료 (Cross, X)")
+        else:
+            print(f"✗ {filter_key} 필터 로드 실패: {filter_errors.get(size, '필터 누락')}")
+
+    print("\n[3] 패턴 자동 분석")
     passed = 0
     failures = []
     samples = {3: (CROSS_3, CROSS_3)}
@@ -261,35 +312,31 @@ def json_mode():
             size = int(match.group(1))
             if not isinstance(case, dict):
                 raise ValueError("패턴 구조 오류")
+
             pattern = case["input"]
             expected = normalize_label(case["expected"])
             if not valid_matrix(pattern, size):
                 raise ValueError("패턴 크기 또는 숫자 데이터 오류")
 
-            filter_key = f"size_{size}"
-            group = filters[filter_key]
-            if not isinstance(group, dict):
-                raise ValueError("필터 구조 오류")
-            standard = {}
-            for label, matrix in group.items():
-                normalized = normalize_label(label)
-                if normalized in standard:
-                    raise ValueError("필터 라벨 중복")
-                if not valid_matrix(matrix, size):
-                    raise ValueError("필터 크기 또는 숫자 데이터 오류")
-                standard[normalized] = matrix
-            if set(standard) != {"Cross", "X"}:
-                raise ValueError("Cross 또는 X 필터 누락")
+            if size not in loaded_filters:
+                filter_reason = filter_errors.get(size, "해당 크기의 필터 누락")
+                raise ValueError(f"필터 로드 실패: {filter_reason}")
 
-            # 사전평가 #4: JSON 로드 -> 패턴 키 -> N 추출 -> 필터 키 선택을 한 줄로 출력합니다.
+            standard = loaded_filters[size]
+            filter_key = f"size_{size}"
             print(f"JSON 선택 로그: patterns[{case_id}] -> N={size} -> "
                   f"filters[{filter_key}] -> Cross/X 필터 선택 완료")
+
             cross_score = mac(pattern, standard["Cross"])
             x_score = mac(pattern, standard["X"])
+            score_difference = abs(cross_score - x_score)
             result = decide(cross_score, x_score, "Cross", "X")
             samples[size] = (pattern, standard["Cross"])
+
             print(f"Cross 점수: {cross_score:.15f}")
             print(f"X 점수: {x_score:.15f}")
+            print(f"점수 차이: {score_difference:.15g} (동점 기준: {EPSILON:g})")
+
             if result == expected:
                 passed += 1
                 print(f"판정: {result} | expected: {expected} | PASS")
